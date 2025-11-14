@@ -9,6 +9,7 @@ Run the script and you will see.
 ## Requirements
 - Bash
 - Git
+- Doas
 - Network Connection
 
 ## Installation

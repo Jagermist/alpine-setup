@@ -70,6 +70,23 @@ if ! doas apk upgrade; then
     exit 1
 fi
 
+# Enable Alpine Edge Repositories
+read -p "Enable Alpine Edge repositories? (y/n): " edge_choice
+if [[ "$edge_choice" == "y" || "$edge_choice" == "Y" ]]; then
+    log_info "Enabling Alpine Edge repositories..."
+    EDGE_REPO=("http://dl-cdn.alpinelinux.org/alpine/edge/main" "http://dl-cdn.alpinelinux.org/alpine/edge/community")
+    for repo in "${EDGE_REPO[@]}"; do
+        if ! doas grep -q "^$repo" /etc/apk/repositories; then
+            doas tee -a /etc/apk/repositories <<< "$repo" > /dev/null
+        fi
+    done
+    if ! doas apk upgrade; then
+        log_error "Failed to upgrade packages after enabling Edge repositories"
+        exit 1
+    fi
+fi
+
+
 # Install Plasma desktop environment
 log_info "Installing Plasma desktop environment..."
 if ! doas setup-desktop plasma; then
@@ -175,6 +192,65 @@ if [[ "$kd_choice" == "y" || "$kd_choice" == "Y" ]]; then
     fi
     popd || exit 1
 fi
+fi
+
+# Setup AppArmour
+read -p "Setup AppArmour for Plasma? (y/n): " aa_choice
+if [[ "$aa_choice" == "y" || "$aa_choice" == "Y" ]]; then
+    log_info "Setting up AppArmour..."
+    if ! doas apk add apparmor apparmor-utils apparmor-profiles; then
+        log_error "Failed to install AppArmour packages"
+        exit 1
+    fi
+    log_info "Configuring Grub to enable AppArmour..."
+    GRUB_FILE=/etc/default/grub
+    if doas grep -q '^GRUB_CMDLINE_LINUX' "$GRUB_FILE"; then
+        current=$(doas sed -n 's/^GRUB_CMDLINE_LINUX="\?\(.*\)"\?/\1/p' "$GRUB_FILE" || true)
+        new="$current"
+        for param in apparmor=1 security=apparmor; do
+            if ! echo " $new " | grep -q " $param "; then
+                new="$new $param"
+            fi
+        done
+        new=$(echo "$new" | xargs)
+        if ! doas sed -i "s#^GRUB_CMDLINE_LINUX=.*#GRUB_CMDLINE_LINUX=\"$new\"#" "$GRUB_FILE"; then
+            log_error "Failed to modify GRUB configuration"
+            exit 1
+        fi
+    else
+        if ! echo 'GRUB_CMDLINE_LINUX="apparmor=1 security=apparmor"' | doas tee -a "$GRUB_FILE" > /dev/null; then
+            log_error "Failed to add GRUB configuration"
+            exit 1
+        fi
+    fi
+    doas grub2-mkconfig -o /boot/grub/grub.cfg
+    log_info "Enabling AppArmour service..."
+    if ! doas rc-update add apparmor boot; then
+        log_error "Failed to add AppArmour to boot runlevel"
+        exit 1
+    fi
+fi
+
+# Disable Grub timeout
+read -p "Disable GRUB timeout? (y/n): " grub_timeout_choice
+if [[ "$grub_timeout_choice" == "y" || "$grub_timeout_choice" == "Y" ]]; then
+    log_info "Disabling GRUB timeout..."
+    GRUB_FILE=/etc/default/grub
+    if doas grep -q '^GRUB_TIMEOUT=' "$GRUB_FILE"; then
+        if ! doas sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=0/' "$GRUB_FILE"; then
+            log_error "Failed to modify GRUB timeout"
+            exit 1
+        fi
+    else
+        if ! echo 'GRUB_TIMEOUT=0' | doas tee -a "$GRUB_FILE" > /dev/null; then
+            log_error "Failed to add GRUB timeout configuration"
+            exit 1
+        fi
+    fi
+    if ! doas grub2-mkconfig -o /boot/grub/grub.cfg; then
+        log_error "Failed to update GRUB configuration"
+        exit 1
+    fi
 fi
 
 log_success "Plasma desktop environment setup completed!"
