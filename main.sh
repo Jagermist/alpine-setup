@@ -57,6 +57,12 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+source /etc/os-release
+if [[ "$ID" != "alpine" ]]; then
+    log_error "This script is intended to run on Alpine Linux only."
+    exit 1
+fi
+
 # Update system packages
 log_info "Updating system packages..."
 if ! doas apk upgrade; then
